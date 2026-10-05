@@ -16,9 +16,18 @@ import {
   pulsarVgnEncodeDpi,
 } from "@openmouse/protocol/pulsar";
 import {
+  TEEVOLUTION_BUTTONS,
+  TEEVOLUTION_CAPTURE_OPTION,
+  TEEVOLUTION_KEYBOARD_ACTION_PREFIX,
+  TEEVOLUTION_MEDIA_ACTION_PREFIX,
   TEEVOLUTION_SHARED_BUTTON_OPTIONS,
+  TEEVOLUTION_KEY_CLASS,
   teevolutionDecodeButtonMappings,
+  teevolutionDecodeShortcutRecord,
   teevolutionRemapButton,
+  teevolutionRemapShortcut,
+  teevolutionShortcutLabel,
+  teevolutionShortcutRecordAddress,
 } from "@openmouse/protocol/teevolution";
 import { ATK_COMPX_PRODUCT_IDS } from "../atk/products.ts";
 import { GRAVASTAR_PRODUCT_IDS } from "../gravastar/products.ts";
@@ -172,8 +181,8 @@ export class PulsarHidClient {
         rippleControl: flash[FLASH.rippleControl] === 1,
         performanceMode: flash[FLASH.performanceState] === 1,
         liftOffDistance: lodValue === 3 ? "Low" : lodValue === 1 ? "Medium" : lodValue === 2 ? "High" : null,
-        buttonMappings: teevolutionDecodeButtonMappings(flash),
-        buttonOptions: TEEVOLUTION_SHARED_BUTTON_OPTIONS,
+        buttonMappings: await this.decodeButtonMappings(flash),
+        buttonOptions: [...TEEVOLUTION_SHARED_BUTTON_OPTIONS, TEEVOLUTION_CAPTURE_OPTION],
         firmware: [
           this.decodeVersionOptional("Mouse", deviceVersion) ?? "Mouse firmware unavailable",
           this.decodeVersionOptional("Dongle", dongleVersion) ?? "Dongle firmware unavailable",
@@ -304,12 +313,37 @@ export class PulsarHidClient {
   /**
    * The key table sits where Teevolution's does (six 4-byte records from 96),
    * inside the flash range readStatus already reads, so buttonMappings costs
-   * no extra reads.
-   *
-   * ponytail: G-Wolves' web driver writes this exact table on the same
-   * reference firmware, but nobody has captured Pulsar Fusion doing it yet.
+   * no extra reads — except class-5 records (keyboard/media chords), whose
+   * labels live in a second 32-byte chord record per button at flash 256.
+   * Only buttons actually holding a chord pay for those reads.
    */
+  private async decodeButtonMappings(flash: Uint8Array): Promise<Record<string, string>> {
+    const mappings = teevolutionDecodeButtonMappings(flash);
+    const decorated = { ...mappings };
+    for (const { name, index } of TEEVOLUTION_BUTTONS) {
+      const keyRecord = flash.slice(96 + index * 4, 96 + index * 4 + 4);
+      if ((keyRecord[0] ?? 0) !== TEEVOLUTION_KEY_CLASS.shortcut) continue;
+      const chord = teevolutionDecodeShortcutRecord(
+        await this.readFlash(teevolutionShortcutRecordAddress(index), 32),
+      );
+      if (chord) {
+        const label = teevolutionShortcutLabel(chord);
+        if (label !== null) decorated[name] = label;
+      }
+    }
+    return decorated;
+  }
+
   async setButtonMapping(button: string, action: string): Promise<void> {
+    if (action.startsWith(TEEVOLUTION_KEYBOARD_ACTION_PREFIX) || action.startsWith(TEEVOLUTION_MEDIA_ACTION_PREFIX)) {
+      await this.withDeviceControl(() => teevolutionRemapShortcut(
+        (address, length) => this.readFlash(address, length),
+        (address, data) => this.writeFlash(address, data),
+        button,
+        action,
+      ));
+      return;
+    }
     await this.withDeviceControl(() => teevolutionRemapButton(
       (address, length) => this.readFlash(address, length),
       (address, data) => this.writeFlash(address, data),

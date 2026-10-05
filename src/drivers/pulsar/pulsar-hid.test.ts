@@ -3,7 +3,12 @@ import test from "node:test";
 
 import { PulsarHidClient } from "./pulsar-hid.ts";
 import { PULSAR_COMMAND } from "@openmouse/protocol/pulsar";
-import { TEEVOLUTION_KEY_CLASS as KEY, teevolutionEncodeKeyFunction } from "@openmouse/protocol/teevolution";
+import {
+  TEEVOLUTION_KEY_CLASS as KEY,
+  teevolutionDecodeShortcutRecord,
+  teevolutionEncodeKeyFunction,
+  teevolutionShortcutLabel,
+} from "@openmouse/protocol/teevolution";
 
 if (typeof (globalThis as { window?: unknown }).window === "undefined") {
   Object.defineProperty(globalThis, "window", { value: globalThis, configurable: true });
@@ -45,8 +50,8 @@ test("rejects devices without the report-8 control collection", () => {
 });
 
 /** Answers report 8 from a flash image, enough for a write and its read-back. */
-function flashDevice(): HIDDevice & { flash: Uint8Array } {
-  const flash = new Uint8Array(256);
+function flashDevice(size = 256): HIDDevice & { flash: Uint8Array } {
+  const flash = new Uint8Array(size);
   let listener: ((event: HIDInputReportEvent) => void) | null = null;
   const fake = {
     ...device(0x3710, 0x0001),
@@ -77,4 +82,21 @@ test("setButtonMapping writes one key record at 96 + 4 * slot", async () => {
   await client.setButtonMapping("DPI", "Middle Click");
   assert.deepEqual([...fake.flash.subarray(116, 120)], [...teevolutionEncodeKeyFunction(KEY.mouse, 0x0400)]);
   await assert.rejects(() => client.setButtonMapping("Left", "Backward"), /Left Click/);
+});
+
+test("setButtonMapping routes keyboard actions to the chord records", async () => {
+  const fake = flashDevice(512);
+  [[KEY.mouse, 0x0100], [KEY.mouse, 0x0200], [KEY.mouse, 0x0400], [KEY.mouse, 0x0800], [KEY.mouse, 0x1000], [KEY.dpi, 0x0100]]
+    .forEach(([cls, param], index) => fake.flash.set(teevolutionEncodeKeyFunction(cls!, param!), 96 + index * 4));
+  const client = new PulsarHidClient(fake);
+  await client.open();
+  await client.setButtonMapping("Back", "keyboard:0:11");
+  // The 4-byte key record switched to class 5 and the chord record landed at
+  // 256 + 32 * slot.
+  assert.deepEqual([...fake.flash.subarray(108, 112)], [...teevolutionEncodeKeyFunction(KEY.shortcut, 0)]);
+  const chord = fake.flash.subarray(256 + 3 * 32, 256 + 3 * 32 + 8);
+  assert.equal(teevolutionShortcutLabel(teevolutionDecodeShortcutRecord(chord)!), "Keyboard: H");
+  // Plain labels still go through the simple remapper.
+  await client.setButtonMapping("Back", "Backward");
+  assert.deepEqual([...fake.flash.subarray(108, 112)], [...teevolutionEncodeKeyFunction(KEY.mouse, 0x0800)]);
 });

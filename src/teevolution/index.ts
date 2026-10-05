@@ -107,6 +107,8 @@ export const TEEVOLUTION_FLASH = {
   dpiLightState: 82,
   /** Base of 4-byte key-function records (one per physical button). */
   keyFunction: 96,
+  /** Base of 32-byte keyboard/media chord records (one per button) — see keyboard.ts. */
+  shortcutKey: 256,
   debounceTime: 169,
   motionSync: 171,
   sleepTime: 173,
@@ -117,12 +119,20 @@ export const TEEVOLUTION_FLASH = {
   sensorMode: 185,
 } as const;
 
-/** Teevolink MouseKeyFunction class byte stored at flash 0x60 + 4×index. */
+/** Teevolink MouseKeyFunction class byte stored at flash 0x60 + 4×index.
+ *  Class 5 (ShortcutKey) carries keyboard/media chords — see keyboard.ts. */
 export const TEEVOLUTION_KEY_CLASS = {
   disable: 0,
   mouse: 1,
   dpi: 2,
   tilt: 3,
+  fireKey: 4,
+  shortcut: 5,
+  macro: 6,
+  reportRateSwitch: 7,
+  profileLoop: 8,
+  dpiLock: 10,
+  upDownRoll: 11,
 } as const;
 
 export const TEEVOLUTION_BUTTONS = [
@@ -599,3 +609,26 @@ export function teevolutionBuildLcdTimePacket(now: Date): Uint8Array {
   return packet;
 }
 
+
+export {
+  TEEVOLUTION_CAPTURE_OPTION,
+  TEEVOLUTION_KEYBOARD_ACTION_PREFIX,
+  TEEVOLUTION_KEYBOARD_KEYS,
+  TEEVOLUTION_MEDIA_ACTION_PREFIX,
+  TEEVOLUTION_MEDIA_KEYS,
+  TEEVOLUTION_MODIFIERS,
+  TEEVOLUTION_SHORTCUT_BASE,
+  TEEVOLUTION_SHORTCUT_ENTRY,
+  TEEVOLUTION_SHORTCUT_MAX_KEYS,
+  TEEVOLUTION_SHORTCUT_PRESS,
+  TEEVOLUTION_SHORTCUT_RECORD_LENGTH,
+  TEEVOLUTION_SHORTCUT_RELEASE,
+  teevolutionDecodeShortcutRecord,
+  teevolutionEncodeShortcutRecord,
+  teevolutionIsShortcutKeyRecord,
+  teevolutionParseShortcutAction,
+  teevolutionRemapShortcut,
+  teevolutionShortcutLabel,
+  teevolutionShortcutRecordAddress,
+} from "./keyboard.ts";
+export type { TeevolutionKeyDef, TeevolutionMediaKeyDef, TeevolutionModifier, TeevolutionShortcutEntry } from "./keyboard.ts";
